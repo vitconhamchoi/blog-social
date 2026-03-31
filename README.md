@@ -65,3 +65,9 @@ Proxy đã cấu hình để gọi backend qua:
 3. Upload ảnh file thật thay vì URL demo
 4. SignalR realtime thật cho feed/friend request
 5. NgRx + Dexie offline cache đúng kiến trúc mục tiêu
+
+## Tiến độ
+Xem tiến độ thực tế tại:
+- `PROGRESS.md`
+- `STATUS.md`
+- `TODO-NEXT.md`

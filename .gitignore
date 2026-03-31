@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.angular/
+coverage/
+obj/
+bin/
+.vscode/
+.env
+.env.*
+appsettings.Development.json
+uploads/
+*.user
+*.suo
+.DS_Store

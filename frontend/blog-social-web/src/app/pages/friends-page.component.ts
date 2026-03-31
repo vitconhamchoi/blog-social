@@ -9,35 +9,62 @@ import { Friendship, User, UserListItem } from '../models';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
   template: `
-    <div class="card column">
-      <h2>Tìm người dùng</h2>
-      <input [(ngModel)]="query" placeholder="Nhập tên hoặc email" />
-      <button class="primary" (click)="search()">Tìm</button>
-      <div *ngFor="let user of users" class="row" style="justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid #eee;">
-        <div>
-          <a [routerLink]="['/u', user.id]">{{ user.fullName }}</a>
-          <div class="muted">{{ user.email }} · {{ user.relationshipStatus }}</div>
+    <div class="layout-3col">
+      <aside class="column sidebar-sticky">
+        <div class="card">
+          <div class="card-title">Bộ lọc</div>
+          <input [(ngModel)]="query" placeholder="Tìm theo tên hoặc email" />
+          <button class="primary" (click)="search()">Tìm kiếm</button>
         </div>
-        <button class="secondary" *ngIf="user.relationshipStatus === 'none'" (click)="sendRequest(user.id)">Kết bạn</button>
-      </div>
-    </div>
+      </aside>
 
-    <div class="card column">
-      <h2>Lời mời kết bạn đến</h2>
-      <div *ngFor="let req of incoming" class="row" style="justify-content:space-between; align-items:center;">
-        <div>{{ req.requesterId }}</div>
-        <div class="row">
-          <button class="primary" (click)="accept(req.id)">Đồng ý</button>
-          <button class="secondary" (click)="reject(req.id)">Từ chối</button>
+      <section class="column">
+        <div class="card">
+          <div class="card-title">Khám phá mọi người</div>
+          <div *ngFor="let user of users" class="list-item">
+            <div class="row" style="align-items:center;">
+              <img class="avatar" [src]="user.avatarUrl || 'https://via.placeholder.com/96?text=U'" />
+              <div>
+                <a [routerLink]="['/u', user.id]" class="post-author-name">{{ user.fullName }}</a>
+                <div class="muted">{{ user.email }}</div>
+                <div class="muted">{{ user.relationshipStatus }}</div>
+              </div>
+            </div>
+            <button class="secondary" *ngIf="user.relationshipStatus === 'none'" (click)="sendRequest(user.id)">Kết bạn</button>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <div class="card column">
-      <h2>Bạn bè</h2>
-      <div *ngFor="let friend of friends">
-        <a [routerLink]="['/u', friend.id]">{{ friend.fullName }}</a>
-      </div>
+        <div class="card">
+          <div class="card-title">Lời mời kết bạn đến</div>
+          <div *ngIf="!incoming.length" class="empty-state">Hiện chưa có lời mời nào.</div>
+          <div *ngFor="let req of incoming" class="list-item">
+            <div>
+              <div class="post-author-name">Request ID: {{ req.id }}</div>
+              <div class="muted">Từ user: {{ req.requesterId }}</div>
+            </div>
+            <div class="row">
+              <button class="primary" (click)="accept(req.id)">Đồng ý</button>
+              <button class="secondary" (click)="reject(req.id)">Từ chối</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="column sidebar-sticky">
+        <div class="card">
+          <div class="card-title">Bạn bè</div>
+          <div *ngIf="!friends.length" class="empty-state">Chưa có bạn bè nào.</div>
+          <div *ngFor="let friend of friends" class="list-item">
+            <div class="row" style="align-items:center;">
+              <img class="avatar" [src]="friend.avatarUrl || 'https://via.placeholder.com/96?text=U'" />
+              <div>
+                <a [routerLink]="['/u', friend.id]" class="post-author-name">{{ friend.fullName }}</a>
+                <div class="muted">{{ friend.email }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
     </div>
   `
 })

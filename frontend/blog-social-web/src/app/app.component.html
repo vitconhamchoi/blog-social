@@ -1,18 +1,28 @@
 <div class="shell">
   <header class="topbar">
-    <a routerLink="/" class="brand">Blog Social</a>
+    <div class="topbar-left">
+      <span class="brand-dot">B</span>
+      <a routerLink="/" class="brand">Blog Social</a>
+    </div>
 
     <nav *ngIf="user() as me" class="nav">
-      <a routerLink="/">Feed</a>
+      <a routerLink="/">Trang chủ</a>
       <a routerLink="/friends">Bạn bè</a>
       <a [routerLink]="['/u', me.id]">Trang cá nhân</a>
-      <button (click)="logout()">Đăng xuất</button>
     </nav>
 
-    <nav *ngIf="!user()" class="nav">
-      <a routerLink="/login">Đăng nhập</a>
-      <a routerLink="/register">Đăng ký</a>
-    </nav>
+    <div class="topbar-right">
+      <ng-container *ngIf="user() as me; else guestActions">
+        <span class="muted">{{ me.fullName }}</span>
+        <button class="secondary" (click)="logout()">Đăng xuất</button>
+      </ng-container>
+      <ng-template #guestActions>
+        <nav class="nav">
+          <a routerLink="/login">Đăng nhập</a>
+          <a routerLink="/register">Đăng ký</a>
+        </nav>
+      </ng-template>
+    </div>
   </header>
 
   <main class="page">

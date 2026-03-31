@@ -9,36 +9,75 @@ import { ProfileDetails } from '../models';
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="card column" *ngIf="profile as p">
-      <div class="row" style="align-items:center;">
-        <img class="avatar" [src]="p.user.avatarUrl || 'https://via.placeholder.com/96?text=U'" />
-        <div>
-          <h2>{{ p.user.fullName }}</h2>
-          <div class="muted">{{ p.user.email }}</div>
-          <div>{{ p.user.bio }}</div>
+    <div *ngIf="profile as p">
+      <div class="card profile-hero">
+        <div class="profile-cover"></div>
+        <div class="profile-body">
+          <div class="profile-head">
+            <img class="avatar-lg" [src]="p.user.avatarUrl || 'https://via.placeholder.com/160?text=U'" />
+            <div>
+              <h1 style="margin:0 0 6px;">{{ p.user.fullName }}</h1>
+              <div class="muted">{{ p.user.email }}</div>
+              <div style="margin-top:8px;">{{ p.user.bio || 'Chưa có giới thiệu.' }}</div>
+            </div>
+          </div>
+
+          <div class="row" *ngIf="!isMe()">
+            <span class="pill" *ngIf="p.areFriends">Đã là bạn bè</span>
+            <span class="pill" *ngIf="!p.areFriends">Chưa là bạn bè</span>
+          </div>
         </div>
       </div>
 
-      <div *ngIf="isMe()" class="column">
-        <h3>Chỉnh sửa hồ sơ</h3>
-        <input [(ngModel)]="fullName" placeholder="Họ tên" />
-        <textarea [(ngModel)]="bio" placeholder="Giới thiệu"></textarea>
-        <input [(ngModel)]="avatarUrl" placeholder="Avatar URL" />
-        <div class="row">
-          <button class="primary" (click)="saveProfile()">Lưu hồ sơ</button>
-          <button class="secondary" (click)="saveAvatar()">Lưu avatar</button>
-        </div>
+      <div class="layout-3col">
+        <aside class="column sidebar-sticky">
+          <div class="card">
+            <div class="card-title">Giới thiệu</div>
+            <div>{{ p.user.bio || 'Người này chưa cập nhật giới thiệu.' }}</div>
+          </div>
+        </aside>
+
+        <section>
+          <div *ngIf="isMe()" class="card column">
+            <div class="card-title">Chỉnh sửa hồ sơ</div>
+            <input [(ngModel)]="fullName" placeholder="Họ tên" />
+            <textarea [(ngModel)]="bio" placeholder="Giới thiệu"></textarea>
+            <input [(ngModel)]="avatarUrl" placeholder="Avatar URL" />
+            <div class="row">
+              <button class="primary" (click)="saveProfile()">Lưu hồ sơ</button>
+              <button class="secondary" (click)="saveAvatar()">Lưu avatar</button>
+            </div>
+          </div>
+
+          <div *ngIf="profile && !profile.areFriends && !isMe()" class="card empty-state">
+            Bạn chưa là bạn bè với người này nên chưa xem được bài đăng của họ.
+          </div>
+
+          <div class="card post-card" *ngFor="let post of profile?.posts">
+            <div class="post-header">
+              <div class="post-author">
+                <img class="avatar" [src]="post.authorAvatarUrl || 'https://via.placeholder.com/96?text=U'" />
+                <div>
+                  <div class="post-author-name">{{ post.authorName }}</div>
+                  <div class="muted">{{ post.createdAt | date:'short' }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="post-content">{{ post.content }}</div>
+            <img *ngFor="let img of post.imageUrls" class="post-img" [src]="img" />
+          </div>
+        </section>
+
+        <aside class="column sidebar-sticky">
+          <div class="card">
+            <div class="card-title">Thông tin</div>
+            <div class="column muted">
+              <div>Tham gia: {{ p.user.createdAt | date:'mediumDate' }}</div>
+              <div>Quyền xem bài: {{ isMe() || p.areFriends ? 'Được phép' : 'Bạn bè mới xem được' }}</div>
+            </div>
+          </div>
+        </aside>
       </div>
-    </div>
-
-    <div *ngIf="profile && !profile.areFriends && !isMe()" class="card">
-      Bạn chưa là bạn bè với người này nên không xem được bài đăng của họ.
-    </div>
-
-    <div class="card" *ngFor="let post of profile?.posts">
-      <div>{{ post.content }}</div>
-      <img *ngFor="let img of post.imageUrls" class="post-img" [src]="img" />
-      <div class="muted" style="margin-top:8px;">{{ post.createdAt | date:'short' }}</div>
     </div>
   `
 })

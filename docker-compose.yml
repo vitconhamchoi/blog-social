@@ -1,0 +1,16 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:16
+    container_name: blog-social-postgres
+    environment:
+      POSTGRES_DB: blog_social
+      POSTGRES_USER: blog_social
+      POSTGRES_PASSWORD: blog_social
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

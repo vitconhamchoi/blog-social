@@ -1,0 +1,18 @@
+:host { display:block; font-family: Arial, Helvetica, sans-serif; color:#1f2937; }
+body, html { margin:0; }
+.shell { min-height:100vh; background:#f3f4f6; }
+.topbar { display:flex; justify-content:space-between; align-items:center; padding:16px 24px; background:#111827; color:white; }
+.brand { color:white; text-decoration:none; font-weight:700; }
+.nav { display:flex; gap:12px; align-items:center; }
+.nav a, .nav button { color:white; background:none; border:none; text-decoration:none; cursor:pointer; font:inherit; }
+.page { max-width:960px; margin:0 auto; padding:24px; }
+.card { background:white; border-radius:12px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.06); margin-bottom:16px; }
+input, textarea, button { font:inherit; }
+input, textarea { width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; box-sizing:border-box; }
+button.primary { background:#2563eb; color:white; border:none; border-radius:8px; padding:10px 14px; cursor:pointer; }
+button.secondary { background:#e5e7eb; color:#111827; border:none; border-radius:8px; padding:10px 14px; cursor:pointer; }
+.row { display:flex; gap:12px; }
+.column { display:flex; flex-direction:column; gap:12px; }
+.muted { color:#6b7280; font-size:14px; }
+.avatar { width:48px; height:48px; border-radius:999px; object-fit:cover; background:#d1d5db; }
+.post-img { width:100%; max-height:420px; object-fit:cover; border-radius:12px; margin-top:12px; }

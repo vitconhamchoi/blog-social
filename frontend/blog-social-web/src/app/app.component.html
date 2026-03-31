@@ -1,0 +1,21 @@
+<div class="shell">
+  <header class="topbar">
+    <a routerLink="/" class="brand">Blog Social</a>
+
+    <nav *ngIf="user() as me" class="nav">
+      <a routerLink="/">Feed</a>
+      <a routerLink="/friends">Bạn bè</a>
+      <a [routerLink]="['/u', me.id]">Trang cá nhân</a>
+      <button (click)="logout()">Đăng xuất</button>
+    </nav>
+
+    <nav *ngIf="!user()" class="nav">
+      <a routerLink="/login">Đăng nhập</a>
+      <a routerLink="/register">Đăng ký</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <router-outlet></router-outlet>
+  </main>
+</div>

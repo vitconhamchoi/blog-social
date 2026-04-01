@@ -53,19 +53,64 @@ Mục tiêu của hệ thống là cung cấp một nền tảng mạng xã hộ
 
 Hệ thống được thiết kế theo mô hình client-server, trong đó frontend là ứng dụng Angular chạy phía trình duyệt, backend là dịch vụ ASP.NET Core cung cấp REST API và realtime hub, còn PostgreSQL là nơi lưu trữ dữ liệu nghiệp vụ.
 
-### 4.1 Các lớp chính của hệ thống
+### 4.1 Sơ đồ kiến trúc logic
+
+```mermaid
+flowchart LR
+    U[Người dùng] --> FE[Frontend Angular]
+    FE -->|HTTPS REST API| API[ASP.NET Core Minimal API]
+    FE -->|WebSocket / SignalR| HUB[SignalR Hub]
+    API --> EF[Entity Framework Core]
+    HUB --> API
+    EF --> DB[(PostgreSQL)]
+    API --> FS[(Local Upload Storage)]
+    FE --> IDX[(IndexedDB / Dexie Cache)]
+```
+
+### 4.2 Các lớp chính của hệ thống
 1. Lớp trình bày: Angular frontend
 2. Lớp dịch vụ ứng dụng: ASP.NET Core API
 3. Lớp giao tiếp thời gian thực: SignalR Hub
 4. Lớp truy cập dữ liệu: EF Core DbContext
 5. Lớp lưu trữ bền vững: PostgreSQL và vùng lưu file ảnh
 
-### 4.2 Đặc điểm kiến trúc hiện tại
+### 4.3 Đặc điểm kiến trúc hiện tại
 - Kiến trúc tách biệt frontend và backend
 - Backend tập trung toàn bộ nghiệp vụ trong một service duy nhất
 - Giao tiếp dữ liệu theo REST cho tác vụ nghiệp vụ thông thường
 - Giao tiếp sự kiện theo SignalR cho cập nhật gần thời gian thực
 - Dữ liệu feed được cache ở phía client để cải thiện trải nghiệm
+
+### 4.4 Sơ đồ luồng xử lý chính
+
+```mermaid
+sequenceDiagram
+    participant User as Người dùng
+    participant FE as Frontend
+    participant API as Backend API
+    participant HUB as SignalR Hub
+    participant DB as PostgreSQL
+
+    User->>FE: Đăng nhập
+    FE->>API: POST /api/auth/login
+    API->>DB: Kiểm tra tài khoản
+    DB-->>API: Dữ liệu người dùng
+    API-->>FE: JWT access token
+
+    FE->>HUB: Kết nối /hubs/social với JWT
+    HUB-->>FE: Kết nối thành công
+
+    User->>FE: Tạo bài viết
+    FE->>API: POST /api/posts
+    API->>DB: Lưu bài viết
+    DB-->>API: Ghi thành công
+    API->>HUB: Phát sự kiện feedUpdated
+    HUB-->>FE: Client nhận sự kiện
+    FE->>API: GET /api/posts/feed
+    API->>DB: Truy vấn feed mới
+    DB-->>API: Dữ liệu feed
+    API-->>FE: Danh sách bài viết cập nhật
+```
 
 ## 5. Luồng nghiệp vụ chính
 

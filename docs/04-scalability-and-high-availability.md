@@ -43,6 +43,50 @@ Kiến trúc khuyến nghị cho giai đoạn production gồm các lớp sau:
 5. Object storage dùng chung cho ảnh
 6. Hàng đợi sự kiện hoặc message broker khi cần tách nghiệp vụ nền
 
+### 4.1 Sơ đồ triển khai mục tiêu
+
+```mermaid
+flowchart TB
+    USER[Người dùng / Trình duyệt] --> LB[Load Balancer / Reverse Proxy]
+
+    LB --> FE[Frontend Static Hosting]
+    LB --> API1[Backend Node 1]
+    LB --> API2[Backend Node 2]
+    LB --> API3[Backend Node N]
+
+    API1 <-->|Pub/Sub / Backplane| REDIS[(Redis)]
+    API2 <-->|Pub/Sub / Backplane| REDIS
+    API3 <-->|Pub/Sub / Backplane| REDIS
+
+    API1 --> DBP[(PostgreSQL Primary)]
+    API2 --> DBP
+    API3 --> DBP
+
+    API1 --> DBR[(PostgreSQL Read Replica)]
+    API2 --> DBR
+    API3 --> DBR
+
+    API1 --> OBJ[(S3 / MinIO Object Storage)]
+    API2 --> OBJ
+    API3 --> OBJ
+
+    API1 --> MQ[(Message Queue / Event Bus)]
+    API2 --> MQ
+    API3 --> MQ
+```
+
+### 4.2 Sơ đồ phân tách tải đọc/ghi
+
+```mermaid
+flowchart LR
+    FE[Frontend] -->|Write: create post, like, comment, friend request| API[Backend]
+    FE -->|Read: feed, profile, friends| API
+    API -->|Write transaction| DBP[(PostgreSQL Primary)]
+    API -->|Read query| DBR[(Read Replica)]
+    API -->|Hot cache| REDIS[(Redis Cache)]
+    API -->|Media upload/download| OBJ[(Object Storage)]
+```
+
 ## 5. Cơ chế mở rộng theo chiều ngang
 
 ### 5.1 Stateless application layer

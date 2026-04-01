@@ -7,6 +7,8 @@ public class AppDbContext : DbContext
     public DbSet<UserEntity> Users => Set<UserEntity>();
     public DbSet<FriendshipEntity> Friendships => Set<FriendshipEntity>();
     public DbSet<PostEntity> Posts => Set<PostEntity>();
+    public DbSet<PostLikeEntity> PostLikes => Set<PostLikeEntity>();
+    public DbSet<PostCommentEntity> PostComments => Set<PostCommentEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,6 +31,28 @@ public class AppDbContext : DbContext
             .WithMany()
             .HasForeignKey(x => x.AuthorId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<PostLikeEntity>()
+            .HasIndex(x => new { x.PostId, x.UserId })
+            .IsUnique();
+
+        modelBuilder.Entity<PostLikeEntity>()
+            .HasOne(x => x.Post)
+            .WithMany()
+            .HasForeignKey(x => x.PostId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<PostCommentEntity>()
+            .HasOne(x => x.Post)
+            .WithMany()
+            .HasForeignKey(x => x.PostId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<PostCommentEntity>()
+            .HasOne(x => x.Author)
+            .WithMany()
+            .HasForeignKey(x => x.AuthorId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -62,5 +86,25 @@ public class PostEntity
     public UserEntity? Author { get; set; }
     public string Content { get; set; } = string.Empty;
     public string ImageUrlsJson { get; set; } = "[]";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public class PostLikeEntity
+{
+    public Guid Id { get; set; }
+    public Guid PostId { get; set; }
+    public PostEntity? Post { get; set; }
+    public Guid UserId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public class PostCommentEntity
+{
+    public Guid Id { get; set; }
+    public Guid PostId { get; set; }
+    public PostEntity? Post { get; set; }
+    public Guid AuthorId { get; set; }
+    public UserEntity? Author { get; set; }
+    public string Content { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
 }

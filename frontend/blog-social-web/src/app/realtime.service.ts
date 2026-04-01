@@ -10,6 +10,7 @@ export class RealtimeService {
     onFriendRequestReceived?: () => void;
     onFriendRequestAccepted?: () => void;
     onFriendsUpdated?: () => void;
+    onPostEngagementUpdated?: () => void;
   }) {
     if (this.connection) return;
 
@@ -24,6 +25,7 @@ export class RealtimeService {
     this.connection.on('friendRequestReceived', () => handlers.onFriendRequestReceived?.());
     this.connection.on('friendRequestAccepted', () => handlers.onFriendRequestAccepted?.());
     this.connection.on('friendsUpdated', () => handlers.onFriendsUpdated?.());
+    this.connection.on('postEngagementUpdated', () => handlers.onPostEngagementUpdated?.());
 
     this.connection.start().catch(() => undefined);
   }

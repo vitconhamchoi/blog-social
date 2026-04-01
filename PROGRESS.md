@@ -39,6 +39,9 @@
 - JWT phase-1 implemented for .NET 8 backend
 - API routes are protected with authorization
 - SignalR now authenticates using JWT bearer token instead of plain userId query model
+- Like/comment data phase-1 implemented with PostgreSQL-backed entities and APIs
+- Feed now binds real likeCount, likedByMe, and comments data
+- Realtime engagement update event added for like/comment changes
 
 ### Current reality
 - Frontend is visually improved and runnable

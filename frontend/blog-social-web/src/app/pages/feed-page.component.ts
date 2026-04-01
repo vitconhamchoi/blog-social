@@ -72,20 +72,32 @@ import { feedFeature } from '../state/app.state';
             <img *ngFor="let img of post.imageUrls" class="post-img" [src]="img" />
 
             <div class="post-social-summary">
-              <div class="muted">{{ likeCounts[i] }} lượt thích</div>
-              <div class="muted">{{ commentDrafts[i] ? 1 : 0 }} bình luận xem trước</div>
+              <div class="muted">{{ post.likeCount }} lượt thích</div>
+              <div class="muted">{{ post.comments.length }} bình luận</div>
             </div>
 
             <div class="post-actions">
-              <button class="post-action-btn" [class.active]="liked[i]" (click)="toggleLike(i)">👍 Thích</button>
+              <button class="post-action-btn" [class.active]="post.likedByMe" (click)="toggleLike(post.id)">👍 Thích</button>
               <button class="post-action-btn" (click)="toggleCommentBox(i)">💬 Bình luận</button>
             </div>
 
             <div class="comment-box" *ngIf="openCommentIndex === i">
-              <input [(ngModel)]="commentDrafts[i]" placeholder="Viết bình luận công khai với bạn bè..." />
+              <div class="column" *ngIf="post.comments.length">
+                <div class="card" style="box-shadow:none; background:#f7f8fa; margin-bottom:0;" *ngFor="let comment of post.comments">
+                  <div class="row" style="align-items:center;">
+                    <img class="avatar" [src]="comment.authorAvatarUrl || 'https://via.placeholder.com/96?text=U'" />
+                    <div>
+                      <div class="post-author-name">{{ comment.authorName }}</div>
+                      <div>{{ comment.content }}</div>
+                      <div class="muted">{{ comment.createdAt | date:'short' }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <input [(ngModel)]="commentDrafts[post.id]" placeholder="Viết bình luận công khai với bạn bè..." />
               <div class="row" style="justify-content:flex-end;">
                 <button class="secondary" (click)="toggleCommentBox(-1)">Đóng</button>
-                <button class="primary">Gửi</button>
+                <button class="primary" (click)="submitComment(post.id)">Gửi</button>
               </div>
             </div>
           </div>
@@ -130,9 +142,7 @@ export class FeedPageComponent implements OnInit {
   content = '';
   uploadedImageUrl = '';
   uploading = false;
-  liked: Record<number, boolean> = {};
-  likeCounts: Record<number, number> = {};
-  commentDrafts: Record<number, string> = {};
+  commentDrafts: Record<string, string> = {};
   openCommentIndex = -1;
 
   constructor(
@@ -143,9 +153,6 @@ export class FeedPageComponent implements OnInit {
   ) {
     this.store.select(feedFeature.selectPosts).subscribe(posts => {
       this.posts = posts;
-      posts.forEach((_, i) => {
-        if (this.likeCounts[i] == null) this.likeCounts[i] = Math.floor(Math.random() * 20);
-      });
     });
   }
 
@@ -156,7 +163,8 @@ export class FeedPageComponent implements OnInit {
       this.feedStore.loadCachedFeed();
       this.load();
       this.realtime.connect(token, {
-        onFeedUpdated: () => this.load()
+        onFeedUpdated: () => this.load(),
+        onPostEngagementUpdated: () => this.load()
       });
     }
   }
@@ -195,9 +203,23 @@ export class FeedPageComponent implements OnInit {
     });
   }
 
-  toggleLike(index: number) {
-    this.liked[index] = !this.liked[index];
-    this.likeCounts[index] = (this.likeCounts[index] || 0) + (this.liked[index] ? 1 : -1);
+  toggleLike(postId: string) {
+    this.api.toggleLike(postId).subscribe({
+      next: () => this.load(),
+      error: () => alert('Thao tác like thất bại')
+    });
+  }
+
+  submitComment(postId: string) {
+    const content = (this.commentDrafts[postId] || '').trim();
+    if (!content) return;
+    this.api.addComment(postId, content).subscribe({
+      next: () => {
+        this.commentDrafts[postId] = '';
+        this.load();
+      },
+      error: () => alert('Gửi bình luận thất bại')
+    });
   }
 
   toggleCommentBox(index: number) {

@@ -64,6 +64,14 @@ export class ApiService {
     return this.http.post<Post>(`${this.baseUrl}/api/posts`, payload, this.authHeaders());
   }
 
+  toggleLike(postId: string) {
+    return this.http.post<Post>(`${this.baseUrl}/api/posts/${postId}/likes/toggle`, {}, this.authHeaders());
+  }
+
+  addComment(postId: string, content: string) {
+    return this.http.post<Post>(`${this.baseUrl}/api/posts/${postId}/comments`, { content }, this.authHeaders());
+  }
+
   searchUsers(q = '') {
     return this.http.get<UserListItem[]>(`${this.baseUrl}/api/users?q=${encodeURIComponent(q)}`, this.authHeaders());
   }

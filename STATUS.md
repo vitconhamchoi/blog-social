@@ -17,6 +17,8 @@
 - Backend now has PostgreSQL phase-1 code integration via EF Core DbContext/entities
 - Runtime verification still requires active PostgreSQL service (Docker daemon/local Postgres)
 - JWT phase-1 is now implemented with signed access tokens and protected routes
+- Like/comment phase-1 data model and APIs are implemented
+- Realtime engagement refresh is wired for like/comment changes
 - JWT auth not yet fully wired end-to-end
 - SignalR server-side realtime fanout not yet finished
 - Post image upload phase-1 now supports file upload to backend local storage

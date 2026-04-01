@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -177,12 +178,8 @@ app.MapGet("/api/users/{userId:guid}", async (HttpContext http, Guid userId, App
     var friendships = await db.Friendships.ToListAsync();
     var areFriends = AreFriends(friendships, me.Id, userId);
 
-    var posts = await db.Posts.Include(x => x.Author)
-        .Where(p => p.AuthorId == userId && (me.Id == userId || areFriends))
-        .OrderByDescending(p => p.CreatedAt)
-        .ToListAsync();
-
-    return Results.Ok(new ProfileDetailsDto(ToUserDto(user), areFriends, posts.Select(ToPostDto).ToList()));
+    var posts = await LoadPostsAsync(db, me.Id, query: p => p.AuthorId == userId && (me.Id == userId || areFriends));
+    return Results.Ok(new ProfileDetailsDto(ToUserDto(user), areFriends, posts));
 }).RequireAuthorization();
 
 app.MapPost("/api/friend-requests/{targetUserId:guid}", async (HttpContext http, Guid targetUserId, AppDbContext db, IHubContext<SocialHub> hub) =>
@@ -318,8 +315,8 @@ app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppDbC
     foreach (var friendId in friendIds)
         await hub.Clients.Group($"user:{friendId}").SendAsync("feedUpdated", new { authorId = me.Id, authorName = me.FullName, postId = post.Id });
 
-    post.Author = me;
-    return Results.Ok(ToPostDto(post));
+    var fullPost = (await LoadPostsAsync(db, me.Id, p => p.Id == post.Id)).First();
+    return Results.Ok(fullPost);
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/feed", async (HttpContext http, AppDbContext db) =>
@@ -333,13 +330,63 @@ app.MapGet("/api/posts/feed", async (HttpContext http, AppDbContext db) =>
         .ToListAsync();
 
     friendIds.Add(me.Id);
+    var posts = await LoadPostsAsync(db, me.Id, p => friendIds.Contains(p.AuthorId));
+    return Results.Ok(posts);
+}).RequireAuthorization();
 
-    var posts = await db.Posts.Include(p => p.Author)
-        .Where(p => friendIds.Contains(p.AuthorId))
-        .OrderByDescending(p => p.CreatedAt)
-        .ToListAsync();
+app.MapPost("/api/posts/{postId:guid}/likes/toggle", async (HttpContext http, Guid postId, AppDbContext db, IHubContext<SocialHub> hub) =>
+{
+    var me = await RequireUserAsync(http, db);
+    if (me is null) return Results.Unauthorized();
 
-    return Results.Ok(posts.Select(ToPostDto).ToList());
+    var post = await db.Posts.Include(p => p.Author).FirstOrDefaultAsync(p => p.Id == postId);
+    if (post is null) return Results.NotFound();
+
+    var existing = await db.PostLikes.FirstOrDefaultAsync(x => x.PostId == postId && x.UserId == me.Id);
+    if (existing is null)
+    {
+        db.PostLikes.Add(new PostLikeEntity { Id = Guid.NewGuid(), PostId = postId, UserId = me.Id, CreatedAt = DateTimeOffset.UtcNow });
+    }
+    else
+    {
+        db.PostLikes.Remove(existing);
+    }
+
+    await db.SaveChangesAsync();
+
+    await hub.Clients.Group($"user:{post.AuthorId}").SendAsync("postEngagementUpdated", new { postId });
+    if (post.AuthorId != me.Id)
+        await hub.Clients.Group($"user:{me.Id}").SendAsync("postEngagementUpdated", new { postId });
+
+    var result = (await LoadPostsAsync(db, me.Id, p => p.Id == postId)).First();
+    return Results.Ok(result);
+}).RequireAuthorization();
+
+app.MapPost("/api/posts/{postId:guid}/comments", async (HttpContext http, Guid postId, CreateCommentRequest req, AppDbContext db, IHubContext<SocialHub> hub) =>
+{
+    var me = await RequireUserAsync(http, db);
+    if (me is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(req.Content)) return Results.BadRequest(new { message = "Comment content is required." });
+
+    var post = await db.Posts.Include(p => p.Author).FirstOrDefaultAsync(p => p.Id == postId);
+    if (post is null) return Results.NotFound();
+
+    db.PostComments.Add(new PostCommentEntity
+    {
+        Id = Guid.NewGuid(),
+        PostId = postId,
+        AuthorId = me.Id,
+        Content = req.Content.Trim(),
+        CreatedAt = DateTimeOffset.UtcNow
+    });
+    await db.SaveChangesAsync();
+
+    await hub.Clients.Group($"user:{post.AuthorId}").SendAsync("postEngagementUpdated", new { postId });
+    if (post.AuthorId != me.Id)
+        await hub.Clients.Group($"user:{me.Id}").SendAsync("postEngagementUpdated", new { postId });
+
+    var result = (await LoadPostsAsync(db, me.Id, p => p.Id == postId)).First();
+    return Results.Ok(result);
 }).RequireAuthorization();
 
 app.MapHub<SocialHub>("/hubs/social").RequireAuthorization();
@@ -348,13 +395,37 @@ app.Run();
 
 static async Task<UserEntity?> RequireUserAsync(HttpContext http, AppDbContext db)
 {
-    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? http.User.FindFirstValue(ClaimTypes.Name) ?? http.User.FindFirstValue("sub");
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                 ?? http.User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                 ?? http.User.FindFirstValue("sub");
     return Guid.TryParse(userId, out var parsedUserId) ? await db.Users.FirstOrDefaultAsync(x => x.Id == parsedUserId) : null;
 }
 
 static UserDto ToUserDto(UserEntity user) => new(user.Id, user.Email, user.FullName, user.Bio, user.AvatarUrl, user.CreatedAt);
 static FriendshipDto ToFriendshipDto(FriendshipEntity fr) => new(fr.Id, fr.RequesterId, fr.AddresseeId, fr.Status, fr.CreatedAt, fr.RespondedAt);
-static PostDto ToPostDto(PostEntity post) => new(post.Id, post.AuthorId, post.Author?.FullName ?? "Unknown", post.Author?.AvatarUrl, post.Content, JsonSerializer.Deserialize<List<string>>(post.ImageUrlsJson) ?? new List<string>(), post.CreatedAt);
+static PostCommentDto ToCommentDto(PostCommentEntity comment) => new(comment.Id, comment.PostId, comment.AuthorId, comment.Author?.FullName ?? "Unknown", comment.Author?.AvatarUrl, comment.Content, comment.CreatedAt);
+
+static async Task<List<PostDto>> LoadPostsAsync(AppDbContext db, Guid currentUserId, Func<PostEntity, bool> query)
+{
+    var posts = db.Posts.Include(p => p.Author).AsEnumerable().Where(query).OrderByDescending(p => p.CreatedAt).ToList();
+    var postIds = posts.Select(p => p.Id).ToList();
+
+    var likes = await db.PostLikes.Where(x => postIds.Contains(x.PostId)).ToListAsync();
+    var comments = await db.PostComments.Include(x => x.Author).Where(x => postIds.Contains(x.PostId)).OrderBy(x => x.CreatedAt).ToListAsync();
+
+    return posts.Select(post => new PostDto(
+        post.Id,
+        post.AuthorId,
+        post.Author?.FullName ?? "Unknown",
+        post.Author?.AvatarUrl,
+        post.Content,
+        JsonSerializer.Deserialize<List<string>>(post.ImageUrlsJson) ?? new List<string>(),
+        post.CreatedAt,
+        likes.Count(x => x.PostId == post.Id),
+        likes.Any(x => x.PostId == post.Id && x.UserId == currentUserId),
+        comments.Where(x => x.PostId == post.Id).Select(ToCommentDto).ToList()
+    )).ToList();
+}
 
 static bool AreFriends(List<FriendshipEntity> friendships, Guid a, Guid b) => friendships.Any(f => f.Status == "accepted" && ((f.RequesterId == a && f.AddresseeId == b) || (f.RequesterId == b && f.AddresseeId == a)));
 static string GetFriendshipStatus(List<FriendshipEntity> friendships, Guid meId, Guid otherUserId)
@@ -376,10 +447,12 @@ record LoginRequest(string Email, string Password);
 record UpdateProfileRequest(string? FullName, string? Bio);
 record UpdateAvatarRequest(string? AvatarUrl);
 record CreatePostRequest(string Content, List<string>? ImageUrls);
+record CreateCommentRequest(string Content);
 record AuthResponse(string AccessToken, UserDto User);
 record UserDto(Guid Id, string Email, string FullName, string Bio, string? AvatarUrl, DateTimeOffset CreatedAt);
 record UserListItemDto(Guid Id, string Email, string FullName, string Bio, string? AvatarUrl, string RelationshipStatus);
-record PostDto(Guid Id, Guid AuthorId, string AuthorName, string? AuthorAvatarUrl, string Content, List<string> ImageUrls, DateTimeOffset CreatedAt);
+record PostCommentDto(Guid Id, Guid PostId, Guid AuthorId, string AuthorName, string? AuthorAvatarUrl, string Content, DateTimeOffset CreatedAt);
+record PostDto(Guid Id, Guid AuthorId, string AuthorName, string? AuthorAvatarUrl, string Content, List<string> ImageUrls, DateTimeOffset CreatedAt, int LikeCount, bool LikedByMe, List<PostCommentDto> Comments);
 record FriendshipDto(Guid Id, Guid RequesterId, Guid AddresseeId, string Status, DateTimeOffset CreatedAt, DateTimeOffset? RespondedAt);
 record ProfileDetailsDto(UserDto User, bool AreFriends, List<PostDto> Posts);
 

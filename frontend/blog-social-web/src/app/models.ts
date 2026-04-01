@@ -12,6 +12,16 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface PostComment {
+  id: string;
+  postId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl?: string | null;
+  content: string;
+  createdAt: string;
+}
+
 export interface Post {
   id: string;
   authorId: string;
@@ -20,6 +30,9 @@ export interface Post {
   content: string;
   imageUrls: string[];
   createdAt: string;
+  likeCount: number;
+  likedByMe: boolean;
+  comments: PostComment[];
 }
 
 export interface Friendship {

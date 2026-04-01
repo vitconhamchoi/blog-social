@@ -19,10 +19,17 @@
 ### In progress
 1. Backend migration to PostgreSQL + EF Core runtime
 2. Real JWT auth wiring
-3. SignalR realtime fanout end-to-end
-4. Like/comment real data model and API
-5. Feed polish and comment UX polish
-6. Test/audit/reporting docs
+3. Like/comment real data model and API
+4. Feed polish and comment UX polish
+5. Test/audit/reporting docs
+
+### Newly completed
+- Realtime phase-1 wired with SignalR on .NET 8 + Angular 17
+- Feed auto-refresh event when a friend creates a post
+- Friend request received event
+- Friend request accepted event
+- Friends list refresh event
+- Frontend SignalR client now joins user-specific realtime channel using userId
 
 ### Current reality
 - Frontend is visually improved and runnable

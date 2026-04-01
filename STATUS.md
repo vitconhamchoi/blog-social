@@ -10,6 +10,7 @@
 - Added NgRx store foundation
 - Added Dexie local cache foundation
 - Added SignalR client foundation
+- Implemented SignalR realtime phase-1 for feed/friend-request/friends updates
 - Added Docker Compose for PostgreSQL
 
 ## Not fully completed yet

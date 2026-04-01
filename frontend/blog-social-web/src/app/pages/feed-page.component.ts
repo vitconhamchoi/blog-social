@@ -2,11 +2,11 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { Store } from '@ngrx/store';
 import { ApiService } from '../api.service';
 import { Post } from '../models';
 import { FeedStoreFacade } from '../feed.store';
 import { RealtimeService } from '../realtime.service';
-import { Store } from '@ngrx/store';
 import { feedFeature } from '../state/app.state';
 
 @Component({
@@ -52,7 +52,7 @@ import { feedFeature } from '../state/app.state';
             </div>
           </div>
 
-          <div class="card post-card" *ngFor="let post of posts">
+          <div class="card post-card" *ngFor="let post of posts; let i = index">
             <div class="post-header">
               <div class="post-author">
                 <img class="avatar" [src]="post.authorAvatarUrl || 'https://via.placeholder.com/96?text=U'" />
@@ -68,6 +68,24 @@ import { feedFeature } from '../state/app.state';
 
             <div class="post-content">{{ post.content }}</div>
             <img *ngFor="let img of post.imageUrls" class="post-img" [src]="img" />
+
+            <div class="post-social-summary">
+              <div class="muted">{{ likeCounts[i] }} lượt thích</div>
+              <div class="muted">{{ commentDrafts[i] ? 1 : 0 }} bình luận xem trước</div>
+            </div>
+
+            <div class="post-actions">
+              <button class="post-action-btn" [class.active]="liked[i]" (click)="toggleLike(i)">👍 Thích</button>
+              <button class="post-action-btn" (click)="toggleCommentBox(i)">💬 Bình luận</button>
+            </div>
+
+            <div class="comment-box" *ngIf="openCommentIndex === i">
+              <input [(ngModel)]="commentDrafts[i]" placeholder="Viết bình luận công khai với bạn bè..." />
+              <div class="row" style="justify-content:flex-end;">
+                <button class="secondary" (click)="toggleCommentBox(-1)">Đóng</button>
+                <button class="primary">Gửi</button>
+              </div>
+            </div>
           </div>
 
           <div *ngIf="!posts.length" class="card empty-state">
@@ -82,6 +100,7 @@ import { feedFeature } from '../state/app.state';
               <div>• Tạo 2 tài khoản để test kết bạn</div>
               <div>• Đồng ý lời mời rồi đăng bài</div>
               <div>• Vào profile nhau để kiểm tra quyền xem bài</div>
+              <div>• Realtime sẽ được nối full ở phase backend/auth tiếp theo</div>
             </div>
           </div>
         </aside>
@@ -108,6 +127,10 @@ export class FeedPageComponent implements OnInit {
   posts: Post[] = [];
   content = '';
   imageUrl = '';
+  liked: Record<number, boolean> = {};
+  likeCounts: Record<number, number> = {};
+  commentDrafts: Record<number, string> = {};
+  openCommentIndex = -1;
 
   constructor(
     public api: ApiService,
@@ -115,14 +138,22 @@ export class FeedPageComponent implements OnInit {
     private realtime: RealtimeService,
     private store: Store
   ) {
-    this.store.select(feedFeature.selectPosts).subscribe(posts => this.posts = posts);
+    this.store.select(feedFeature.selectPosts).subscribe(posts => {
+      this.posts = posts;
+      posts.forEach((_, i) => {
+        if (this.likeCounts[i] == null) this.likeCounts[i] = Math.floor(Math.random() * 20);
+      });
+    });
   }
 
   ngOnInit(): void {
-    if (this.api.currentUser()) {
+    const me = this.api.currentUser();
+    if (me) {
       this.feedStore.loadCachedFeed();
       this.load();
-      this.realtime.connect(() => this.load());
+      this.realtime.connect(me.id, {
+        onFeedUpdated: () => this.load()
+      });
     }
   }
 
@@ -140,5 +171,14 @@ export class FeedPageComponent implements OnInit {
       },
       error: () => alert('Đăng bài thất bại')
     });
+  }
+
+  toggleLike(index: number) {
+    this.liked[index] = !this.liked[index];
+    this.likeCounts[index] = (this.likeCounts[index] || 0) + (this.liked[index] ? 1 : -1);
+  }
+
+  toggleCommentBox(index: number) {
+    this.openCommentIndex = this.openCommentIndex === index ? -1 : index;
   }
 }

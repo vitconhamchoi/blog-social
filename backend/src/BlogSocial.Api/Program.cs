@@ -115,7 +115,7 @@ app.MapGet("/api/users/{userId:guid}", (HttpContext http, Guid userId, AppState 
     return Results.Ok(new ProfileDetailsDto(ToUserDto(user), areFriends, posts));
 });
 
-app.MapPost("/api/friend-requests/{targetUserId:guid}", (HttpContext http, Guid targetUserId, AppState state) =>
+app.MapPost("/api/friend-requests/{targetUserId:guid}", async (HttpContext http, Guid targetUserId, AppState state, IHubContext<SocialHub> hub) =>
 {
     var me = state.RequireUser(http);
     if (me is null) return Results.Unauthorized();
@@ -134,10 +134,12 @@ app.MapPost("/api/friend-requests/{targetUserId:guid}", (HttpContext http, Guid 
         CreatedAt = DateTimeOffset.UtcNow
     };
     state.Friendships[fr.Id] = fr;
+
+    await hub.Clients.Group($"user:{targetUserId}").SendAsync("friendRequestReceived", new { requestId = fr.Id, fromUserId = me.Id, fromName = me.FullName });
     return Results.Ok(state.ToFriendshipDto(fr));
 });
 
-app.MapPost("/api/friend-requests/{requestId:guid}/accept", (HttpContext http, Guid requestId, AppState state) =>
+app.MapPost("/api/friend-requests/{requestId:guid}/accept", async (HttpContext http, Guid requestId, AppState state, IHubContext<SocialHub> hub) =>
 {
     var me = state.RequireUser(http);
     if (me is null) return Results.Unauthorized();
@@ -145,6 +147,11 @@ app.MapPost("/api/friend-requests/{requestId:guid}/accept", (HttpContext http, G
     if (fr.AddresseeId != me.Id) return Results.Forbid();
     fr.Status = FriendshipStatus.Accepted;
     fr.RespondedAt = DateTimeOffset.UtcNow;
+
+    await hub.Clients.Group($"user:{fr.RequesterId}").SendAsync("friendRequestAccepted", new { requestId = fr.Id, byUserId = me.Id, byName = me.FullName });
+    await hub.Clients.Group($"user:{fr.RequesterId}").SendAsync("friendsUpdated");
+    await hub.Clients.Group($"user:{fr.AddresseeId}").SendAsync("friendsUpdated");
+
     return Results.Ok(state.ToFriendshipDto(fr));
 });
 
@@ -187,7 +194,7 @@ app.MapGet("/api/friend-requests/outgoing", (HttpContext http, AppState state) =
     return Results.Ok(state.Friendships.Values.Where(f => f.RequesterId == me.Id && f.Status == FriendshipStatus.Pending).Select(state.ToFriendshipDto).ToList());
 });
 
-app.MapPost("/api/posts", (HttpContext http, CreatePostRequest req, AppState state) =>
+app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppState state, IHubContext<SocialHub> hub) =>
 {
     var me = state.RequireUser(http);
     if (me is null) return Results.Unauthorized();
@@ -203,6 +210,12 @@ app.MapPost("/api/posts", (HttpContext http, CreatePostRequest req, AppState sta
     };
 
     state.Posts[post.Id] = post;
+
+    foreach (var friendId in state.GetFriendIds(me.Id))
+    {
+        await hub.Clients.Group($"user:{friendId}").SendAsync("feedUpdated", new { authorId = me.Id, authorName = me.FullName, postId = post.Id });
+    }
+
     return Results.Ok(state.ToPostDto(post));
 });
 
@@ -324,6 +337,16 @@ class AppState
 
 class SocialHub : Hub
 {
+    public override async Task OnConnectedAsync()
+    {
+        var http = Context.GetHttpContext();
+        var userId = http?.Request.Query["userId"].ToString();
+        if (Guid.TryParse(userId, out var parsedUserId))
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{parsedUserId}");
+        }
+        await base.OnConnectedAsync();
+    }
 }
 
 static class PasswordHasher

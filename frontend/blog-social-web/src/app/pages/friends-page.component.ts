@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../api.service';
 import { Friendship, User, UserListItem } from '../models';
+import { RealtimeService } from '../realtime.service';
 
 @Component({
   standalone: true,
@@ -74,12 +75,21 @@ export class FriendsPageComponent implements OnInit {
   incoming: Friendship[] = [];
   friends: User[] = [];
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, private realtime: RealtimeService) {}
 
   ngOnInit(): void {
     this.search();
     this.loadIncoming();
     this.loadFriends();
+
+    const userId = this.api.currentUser()?.id;
+    if (userId) {
+      this.realtime.connect(userId, {
+        onFriendRequestReceived: () => this.loadIncoming(),
+        onFriendRequestAccepted: () => { this.loadFriends(); this.search(); },
+        onFriendsUpdated: () => { this.loadFriends(); this.search(); }
+      });
+    }
   }
 
   search() { this.api.searchUsers(this.query).subscribe(x => this.users = x); }

@@ -59,7 +59,7 @@ Hệ thống được thiết kế theo mô hình client-server, trong đó fron
 flowchart LR
     U[Người dùng] --> FE[Frontend Angular]
     FE -->|HTTPS REST API| API[ASP.NET Core Minimal API]
-    FE -->|WebSocket / SignalR| HUB[SignalR Hub]
+    FE <-->|WebSocket / SignalR| HUB[SignalR Hub]
     API --> EF[Entity Framework Core]
     HUB --> API
     EF --> DB[(PostgreSQL)]

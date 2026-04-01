@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { AuthResponse, Friendship, Post, ProfileDetails, UploadResponse, User, UserListItem } from './models';
+import { AuthResponse, CommentsPage, Friendship, Post, ProfileDetails, UploadResponse, User, UserListItem } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -68,8 +68,12 @@ export class ApiService {
     return this.http.post<Post>(`${this.baseUrl}/api/posts/${postId}/likes/toggle`, {}, this.authHeaders());
   }
 
-  addComment(postId: string, content: string) {
-    return this.http.post<Post>(`${this.baseUrl}/api/posts/${postId}/comments`, { content }, this.authHeaders());
+  addComment(postId: string, content: string, parentCommentId?: string | null) {
+    return this.http.post<Post>(`${this.baseUrl}/api/posts/${postId}/comments`, { content, parentCommentId }, this.authHeaders());
+  }
+
+  getComments(postId: string, skip = 0, take = 5) {
+    return this.http.get<CommentsPage>(`${this.baseUrl}/api/posts/${postId}/comments?skip=${skip}&take=${take}`, this.authHeaders());
   }
 
   searchUsers(q = '') {

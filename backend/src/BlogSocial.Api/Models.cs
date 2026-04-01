@@ -53,6 +53,12 @@ public class AppDbContext : DbContext
             .WithMany()
             .HasForeignKey(x => x.AuthorId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<PostCommentEntity>()
+            .HasOne(x => x.ParentComment)
+            .WithMany()
+            .HasForeignKey(x => x.ParentCommentId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -105,6 +111,8 @@ public class PostCommentEntity
     public PostEntity? Post { get; set; }
     public Guid AuthorId { get; set; }
     public UserEntity? Author { get; set; }
+    public Guid? ParentCommentId { get; set; }
+    public PostCommentEntity? ParentComment { get; set; }
     public string Content { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
 }

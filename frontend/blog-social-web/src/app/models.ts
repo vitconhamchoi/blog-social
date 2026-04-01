@@ -12,14 +12,35 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface PostComment {
+export interface PostCommentReply {
   id: string;
   postId: string;
+  parentCommentId?: string | null;
   authorId: string;
   authorName: string;
   authorAvatarUrl?: string | null;
   content: string;
   createdAt: string;
+}
+
+export interface PostComment {
+  id: string;
+  postId: string;
+  parentCommentId?: string | null;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl?: string | null;
+  content: string;
+  createdAt: string;
+  replies: PostCommentReply[];
+}
+
+export interface CommentsPage {
+  items: PostComment[];
+  totalCount: number;
+  hasMore: boolean;
+  skip: number;
+  take: number;
 }
 
 export interface Post {
@@ -33,6 +54,7 @@ export interface Post {
   likeCount: number;
   likedByMe: boolean;
   comments: PostComment[];
+  commentCount: number;
 }
 
 export interface Friendship {

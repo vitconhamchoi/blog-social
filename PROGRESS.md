@@ -42,6 +42,9 @@
 - Like/comment data phase-1 implemented with PostgreSQL-backed entities and APIs
 - Feed now binds real likeCount, likedByMe, and comments data
 - Realtime engagement update event added for like/comment changes
+- Thread comment phase-1 implemented with single-level replies
+- Comment pagination endpoint added for per-post comment loading
+- Feed UI now supports view-more comments and reply flow
 
 ### Current reality
 - Frontend is visually improved and runnable

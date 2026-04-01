@@ -40,3 +40,8 @@ export interface ProfileDetails {
   areFriends: boolean;
   posts: Post[];
 }
+
+export interface UploadResponse {
+  url: string;
+  fileName: string;
+}

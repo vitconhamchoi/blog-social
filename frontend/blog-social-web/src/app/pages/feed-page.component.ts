@@ -43,7 +43,9 @@ import { feedFeature } from '../state/app.state';
               <img class="avatar" [src]="me.avatarUrl || 'https://via.placeholder.com/96?text=U'" />
               <div class="column" style="flex:1;">
                 <textarea class="composer-input" rows="4" [(ngModel)]="content" placeholder="Bạn đang nghĩ gì?"></textarea>
-                <input [(ngModel)]="imageUrl" placeholder="Dán URL ảnh cho bài viết (demo phase 1)" />
+                <input type="file" accept="image/*" (change)="onFileSelected($event)" />
+                <div *ngIf="uploading" class="muted">Đang upload ảnh...</div>
+                <img *ngIf="uploadedImageUrl" [src]="uploadedImageUrl" class="post-img" style="max-height:240px; border-radius:12px;" />
                 <div class="row-between">
                   <span class="muted">Bài viết của bạn chỉ bạn bè mới xem được.</span>
                   <button class="primary" (click)="createPost()">Đăng</button>
@@ -100,7 +102,7 @@ import { feedFeature } from '../state/app.state';
               <div>• Tạo 2 tài khoản để test kết bạn</div>
               <div>• Đồng ý lời mời rồi đăng bài</div>
               <div>• Vào profile nhau để kiểm tra quyền xem bài</div>
-              <div>• Realtime sẽ được nối full ở phase backend/auth tiếp theo</div>
+              <div>• Feed đã có realtime phase 1</div>
             </div>
           </div>
         </aside>
@@ -126,7 +128,8 @@ import { feedFeature } from '../state/app.state';
 export class FeedPageComponent implements OnInit {
   posts: Post[] = [];
   content = '';
-  imageUrl = '';
+  uploadedImageUrl = '';
+  uploading = false;
   liked: Record<number, boolean> = {};
   likeCounts: Record<number, number> = {};
   commentDrafts: Record<number, string> = {};
@@ -161,12 +164,30 @@ export class FeedPageComponent implements OnInit {
     this.feedStore.loadFeed();
   }
 
+  onFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    this.uploading = true;
+    this.api.uploadImage(file).subscribe({
+      next: (res) => {
+        this.uploadedImageUrl = res.url;
+        this.uploading = false;
+      },
+      error: () => {
+        this.uploading = false;
+        alert('Upload ảnh thất bại');
+      }
+    });
+  }
+
   createPost() {
-    const images = this.imageUrl.trim() ? [this.imageUrl.trim()] : [];
+    const images = this.uploadedImageUrl ? [this.uploadedImageUrl] : [];
     this.api.createPost({ content: this.content, imageUrls: images }).subscribe({
       next: () => {
         this.content = '';
-        this.imageUrl = '';
+        this.uploadedImageUrl = '';
         this.load();
       },
       error: () => alert('Đăng bài thất bại')

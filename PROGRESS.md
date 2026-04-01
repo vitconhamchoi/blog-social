@@ -33,6 +33,9 @@
 - Backend PostgreSQL phase-1 integration coded with EF Core DbContext/entities
 - API routes refactored from in-memory store to DbContext-backed queries/writes
 - Database schema auto-create path added with `EnsureCreated()`
+- Upload file phase-1 implemented for post images
+- Frontend composer now uses file input instead of manual URL input
+- Backend serves uploaded files via `/uploads/*`
 
 ### Current reality
 - Frontend is visually improved and runnable

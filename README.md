@@ -13,7 +13,7 @@ Facebook-mini / blog cá nhân theo stack lấy cảm hứng từ 2 dự án tod
   - feed
   - tìm user / kết bạn / chấp nhận lời mời
   - profile cá nhân
-  - tạo bài đăng status có ảnh bằng URL demo
+  - tạo bài đăng status có upload ảnh file thật (phase 1 local storage)
 
 ### Backend
 - ASP.NET Core Minimal API (.NET 8 local runtime)

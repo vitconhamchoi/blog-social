@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { AuthResponse, Friendship, Post, ProfileDetails, User, UserListItem } from './models';
+import { AuthResponse, Friendship, Post, ProfileDetails, UploadResponse, User, UserListItem } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -48,6 +48,12 @@ export class ApiService {
 
   updateAvatar(payload: { avatarUrl: string }) {
     return this.http.post<User>(`${this.baseUrl}/api/users/me/avatar`, payload, this.authHeaders());
+  }
+
+  uploadImage(file: File) {
+    const form = new FormData();
+    form.append('file', file);
+    return this.http.post<UploadResponse>(`${this.baseUrl}/api/uploads/image`, form, this.authHeaders());
   }
 
   getFeed() {

@@ -24,6 +24,14 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("frontend");
 
+var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
+Directory.CreateDirectory(uploadsPath);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
+    RequestPath = "/uploads"
+});
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -226,6 +234,23 @@ app.MapGet("/api/friend-requests/outgoing", async (HttpContext http, AppDbContex
     if (me is null) return Results.Unauthorized();
     var items = await db.Friendships.Where(f => f.RequesterId == me.Id && f.Status == "pending").ToListAsync();
     return Results.Ok(items.Select(ToFriendshipDto).ToList());
+});
+
+app.MapPost("/api/uploads/image", async (HttpContext http) =>
+{
+    var form = await http.Request.ReadFormAsync();
+    var file = form.Files["file"];
+    if (file is null || file.Length == 0) return Results.BadRequest(new { message = "File is required." });
+
+    var extension = Path.GetExtension(file.FileName);
+    var fileName = $"{Guid.NewGuid()}{extension}";
+    var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
+    var filePath = Path.Combine(uploadsPath, fileName);
+
+    await using var stream = File.Create(filePath);
+    await file.CopyToAsync(stream);
+
+    return Results.Ok(new { url = $"/uploads/{fileName}", fileName });
 });
 
 app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppDbContext db, IHubContext<SocialHub> hub) =>

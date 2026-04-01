@@ -18,7 +18,7 @@
 - Runtime verification still requires active PostgreSQL service (Docker daemon/local Postgres)
 - JWT auth not yet fully wired end-to-end
 - SignalR server-side realtime fanout not yet finished
-- Media upload is still URL demo, not file upload
+- Post image upload phase-1 now supports file upload to backend local storage
 - Dexie offline queue is not fully wired
 - NgRx effects are not fully wired
 

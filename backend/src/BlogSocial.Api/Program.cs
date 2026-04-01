@@ -1,8 +1,16 @@
+using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -16,6 +24,36 @@ builder.Services.AddCors(options =>
         .SetIsOriginAllowed(_ => true));
 });
 
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidAudience = jwtOptions.Audience,
+            IssuerSigningKey = signingKey,
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/social"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -23,6 +61,8 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("frontend");
+app.UseAuthentication();
+app.UseAuthorization();
 
 var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
 Directory.CreateDirectory(uploadsPath);
@@ -41,13 +81,12 @@ using (var scope = app.Services.CreateScope())
     }
     catch
     {
-        // Database may be unavailable; app can still start for now.
     }
 }
 
-app.MapGet("/", () => Results.Ok(new { service = "BlogSocial.Api", status = "ok", storage = "postgres-configured" }));
+app.MapGet("/", () => Results.Ok(new { service = "BlogSocial.Api", status = "ok", storage = "postgres-configured", auth = "jwt-phase1" }));
 
-app.MapPost("/api/auth/register", async (RegisterRequest req, AppDbContext db) =>
+app.MapPost("/api/auth/register", async (RegisterRequest req, AppDbContext db, JwtTokenService jwt) =>
 {
     if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password) || string.IsNullOrWhiteSpace(req.FullName))
         return Results.BadRequest(new { message = "Email, password, fullName are required." });
@@ -70,18 +109,18 @@ app.MapPost("/api/auth/register", async (RegisterRequest req, AppDbContext db) =
     db.Users.Add(user);
     await db.SaveChangesAsync();
 
-    var token = user.Id.ToString(); // transitional token for phase before JWT wiring
+    var token = jwt.CreateAccessToken(user);
     return Results.Ok(new AuthResponse(token, ToUserDto(user)));
 });
 
-app.MapPost("/api/auth/login", async (LoginRequest req, AppDbContext db) =>
+app.MapPost("/api/auth/login", async (LoginRequest req, AppDbContext db, JwtTokenService jwt) =>
 {
     var email = req.Email?.Trim().ToLowerInvariant() ?? string.Empty;
     var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
     if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
         return Results.BadRequest(new { message = "Invalid credentials." });
 
-    var token = user.Id.ToString();
+    var token = jwt.CreateAccessToken(user);
     return Results.Ok(new AuthResponse(token, ToUserDto(user)));
 });
 
@@ -89,7 +128,7 @@ app.MapGet("/api/auth/me", async (HttpContext http, AppDbContext db) =>
 {
     var user = await RequireUserAsync(http, db);
     return user is null ? Results.Unauthorized() : Results.Ok(ToUserDto(user));
-});
+}).RequireAuthorization();
 
 app.MapPatch("/api/users/me", async (HttpContext http, UpdateProfileRequest req, AppDbContext db) =>
 {
@@ -100,7 +139,7 @@ app.MapPatch("/api/users/me", async (HttpContext http, UpdateProfileRequest req,
     user.Bio = req.Bio?.Trim() ?? user.Bio;
     await db.SaveChangesAsync();
     return Results.Ok(ToUserDto(user));
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/users/me/avatar", async (HttpContext http, UpdateAvatarRequest req, AppDbContext db) =>
 {
@@ -109,7 +148,7 @@ app.MapPost("/api/users/me/avatar", async (HttpContext http, UpdateAvatarRequest
     user.AvatarUrl = req.AvatarUrl?.Trim();
     await db.SaveChangesAsync();
     return Results.Ok(ToUserDto(user));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/users", async (HttpContext http, string? q, AppDbContext db) =>
 {
@@ -125,7 +164,7 @@ app.MapGet("/api/users", async (HttpContext http, string? q, AppDbContext db) =>
     var friendships = await db.Friendships.ToListAsync();
     var result = users.Select(u => new UserListItemDto(u.Id, u.Email, u.FullName, u.Bio, u.AvatarUrl, GetFriendshipStatus(friendships, me.Id, u.Id))).ToList();
     return Results.Ok(result);
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/users/{userId:guid}", async (HttpContext http, Guid userId, AppDbContext db) =>
 {
@@ -144,7 +183,7 @@ app.MapGet("/api/users/{userId:guid}", async (HttpContext http, Guid userId, App
         .ToListAsync();
 
     return Results.Ok(new ProfileDetailsDto(ToUserDto(user), areFriends, posts.Select(ToPostDto).ToList()));
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/friend-requests/{targetUserId:guid}", async (HttpContext http, Guid targetUserId, AppDbContext db, IHubContext<SocialHub> hub) =>
 {
@@ -171,7 +210,7 @@ app.MapPost("/api/friend-requests/{targetUserId:guid}", async (HttpContext http,
 
     await hub.Clients.Group($"user:{targetUserId}").SendAsync("friendRequestReceived", new { requestId = fr.Id, fromUserId = me.Id, fromName = me.FullName });
     return Results.Ok(ToFriendshipDto(fr));
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/friend-requests/{requestId:guid}/accept", async (HttpContext http, Guid requestId, AppDbContext db, IHubContext<SocialHub> hub) =>
 {
@@ -191,7 +230,7 @@ app.MapPost("/api/friend-requests/{requestId:guid}/accept", async (HttpContext h
     await hub.Clients.Group($"user:{fr.AddresseeId}").SendAsync("friendsUpdated");
 
     return Results.Ok(ToFriendshipDto(fr));
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/friend-requests/{requestId:guid}/reject", async (HttpContext http, Guid requestId, AppDbContext db) =>
 {
@@ -206,7 +245,7 @@ app.MapPost("/api/friend-requests/{requestId:guid}/reject", async (HttpContext h
     fr.RespondedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync();
     return Results.Ok(ToFriendshipDto(fr));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/friends", async (HttpContext http, AppDbContext db) =>
 {
@@ -218,7 +257,7 @@ app.MapGet("/api/friends", async (HttpContext http, AppDbContext db) =>
     var friends = await db.Users.Where(u => friendIds.Contains(u.Id)).ToListAsync();
 
     return Results.Ok(friends.Select(ToUserDto).ToList());
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/friend-requests/incoming", async (HttpContext http, AppDbContext db) =>
 {
@@ -226,7 +265,7 @@ app.MapGet("/api/friend-requests/incoming", async (HttpContext http, AppDbContex
     if (me is null) return Results.Unauthorized();
     var items = await db.Friendships.Where(f => f.AddresseeId == me.Id && f.Status == "pending").ToListAsync();
     return Results.Ok(items.Select(ToFriendshipDto).ToList());
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/friend-requests/outgoing", async (HttpContext http, AppDbContext db) =>
 {
@@ -234,7 +273,7 @@ app.MapGet("/api/friend-requests/outgoing", async (HttpContext http, AppDbContex
     if (me is null) return Results.Unauthorized();
     var items = await db.Friendships.Where(f => f.RequesterId == me.Id && f.Status == "pending").ToListAsync();
     return Results.Ok(items.Select(ToFriendshipDto).ToList());
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/uploads/image", async (HttpContext http) =>
 {
@@ -251,7 +290,7 @@ app.MapPost("/api/uploads/image", async (HttpContext http) =>
     await file.CopyToAsync(stream);
 
     return Results.Ok(new { url = $"/uploads/{fileName}", fileName });
-});
+}).RequireAuthorization();
 
 app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppDbContext db, IHubContext<SocialHub> hub) =>
 {
@@ -281,7 +320,7 @@ app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppDbC
 
     post.Author = me;
     return Results.Ok(ToPostDto(post));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/posts/feed", async (HttpContext http, AppDbContext db) =>
 {
@@ -301,18 +340,16 @@ app.MapGet("/api/posts/feed", async (HttpContext http, AppDbContext db) =>
         .ToListAsync();
 
     return Results.Ok(posts.Select(ToPostDto).ToList());
-});
+}).RequireAuthorization();
 
-app.MapHub<SocialHub>("/hubs/social");
+app.MapHub<SocialHub>("/hubs/social").RequireAuthorization();
 
 app.Run();
 
 static async Task<UserEntity?> RequireUserAsync(HttpContext http, AppDbContext db)
 {
-    var header = http.Request.Headers.Authorization.ToString();
-    if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ")) return null;
-    var token = header[7..].Trim();
-    return Guid.TryParse(token, out var userId) ? await db.Users.FirstOrDefaultAsync(x => x.Id == userId) : null;
+    var userId = http.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? http.User.FindFirstValue(ClaimTypes.Name) ?? http.User.FindFirstValue("sub");
+    return Guid.TryParse(userId, out var parsedUserId) ? await db.Users.FirstOrDefaultAsync(x => x.Id == parsedUserId) : null;
 }
 
 static UserDto ToUserDto(UserEntity user) => new(user.Id, user.Email, user.FullName, user.Bio, user.AvatarUrl, user.CreatedAt);
@@ -350,8 +387,7 @@ class SocialHub : Hub
 {
     public override async Task OnConnectedAsync()
     {
-        var http = Context.GetHttpContext();
-        var userId = http?.Request.Query["userId"].ToString();
+        var userId = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (Guid.TryParse(userId, out var parsedUserId))
             await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{parsedUserId}");
 

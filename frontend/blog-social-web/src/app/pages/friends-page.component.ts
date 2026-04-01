@@ -82,9 +82,9 @@ export class FriendsPageComponent implements OnInit {
     this.loadIncoming();
     this.loadFriends();
 
-    const userId = this.api.currentUser()?.id;
-    if (userId) {
-      this.realtime.connect(userId, {
+    const token = this.api.token();
+    if (token) {
+      this.realtime.connect(token, {
         onFriendRequestReceived: () => this.loadIncoming(),
         onFriendRequestAccepted: () => { this.loadFriends(); this.search(); },
         onFriendsUpdated: () => { this.loadFriends(); this.search(); }

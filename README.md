@@ -17,8 +17,9 @@ Facebook-mini / blog cá nhân theo stack lấy cảm hứng từ 2 dự án tod
 
 ### Backend
 - ASP.NET Core Minimal API (.NET 8 local runtime)
-- SignalR hub skeleton
-- In-memory app state cho phase 1 demo
+- SignalR realtime
+- EF Core + PostgreSQL phase 1
+- JWT authentication phase 1
 - Swagger
 
 ## Chức năng đang có

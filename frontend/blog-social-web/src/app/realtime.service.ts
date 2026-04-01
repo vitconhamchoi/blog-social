@@ -5,7 +5,7 @@ import * as signalR from '@microsoft/signalr';
 export class RealtimeService {
   private connection?: signalR.HubConnection;
 
-  connect(userId: string, handlers: {
+  connect(token: string, handlers: {
     onFeedUpdated?: () => void;
     onFriendRequestReceived?: () => void;
     onFriendRequestAccepted?: () => void;
@@ -14,7 +14,9 @@ export class RealtimeService {
     if (this.connection) return;
 
     this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(`/hubs/social?userId=${encodeURIComponent(userId)}`)
+      .withUrl('/hubs/social', {
+        accessTokenFactory: () => token
+      })
       .withAutomaticReconnect()
       .build();
 

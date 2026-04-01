@@ -36,6 +36,9 @@
 - Upload file phase-1 implemented for post images
 - Frontend composer now uses file input instead of manual URL input
 - Backend serves uploaded files via `/uploads/*`
+- JWT phase-1 implemented for .NET 8 backend
+- API routes are protected with authorization
+- SignalR now authenticates using JWT bearer token instead of plain userId query model
 
 ### Current reality
 - Frontend is visually improved and runnable

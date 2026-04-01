@@ -151,10 +151,11 @@ export class FeedPageComponent implements OnInit {
 
   ngOnInit(): void {
     const me = this.api.currentUser();
-    if (me) {
+    const token = this.api.token();
+    if (me && token) {
       this.feedStore.loadCachedFeed();
       this.load();
-      this.realtime.connect(me.id, {
+      this.realtime.connect(token, {
         onFeedUpdated: () => this.load()
       });
     }

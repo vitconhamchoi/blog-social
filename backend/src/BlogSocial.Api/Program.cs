@@ -1,7 +1,6 @@
-using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,229 +15,299 @@ builder.Services.AddCors(options =>
         .AllowCredentials()
         .SetIsOriginAllowed(_ => true));
 });
-builder.Services.AddSingleton<AppState>();
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("frontend");
 
-app.MapGet("/", () => Results.Ok(new { service = "BlogSocial.Api", status = "ok" }));
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        db.Database.EnsureCreated();
+    }
+    catch
+    {
+        // Database may be unavailable; app can still start for now.
+    }
+}
 
-app.MapPost("/api/auth/register", (RegisterRequest req, AppState state) =>
+app.MapGet("/", () => Results.Ok(new { service = "BlogSocial.Api", status = "ok", storage = "postgres-configured" }));
+
+app.MapPost("/api/auth/register", async (RegisterRequest req, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password) || string.IsNullOrWhiteSpace(req.FullName))
         return Results.BadRequest(new { message = "Email, password, fullName are required." });
 
-    if (state.Users.Values.Any(u => u.Email.Equals(req.Email, StringComparison.OrdinalIgnoreCase)))
+    var normalizedEmail = req.Email.Trim().ToLowerInvariant();
+    if (await db.Users.AnyAsync(u => u.Email == normalizedEmail))
         return Results.BadRequest(new { message = "Email already exists." });
 
-    var user = new UserRecord
+    var user = new UserEntity
     {
         Id = Guid.NewGuid(),
-        Email = req.Email.Trim().ToLowerInvariant(),
+        Email = normalizedEmail,
         FullName = req.FullName.Trim(),
-        PasswordHash = PasswordHasher.Hash(req.Password),
+        PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
         Bio = string.Empty,
         AvatarUrl = null,
         CreatedAt = DateTimeOffset.UtcNow
     };
 
-    state.Users[user.Id] = user;
-    var token = state.IssueToken(user.Id);
+    db.Users.Add(user);
+    await db.SaveChangesAsync();
+
+    var token = user.Id.ToString(); // transitional token for phase before JWT wiring
     return Results.Ok(new AuthResponse(token, ToUserDto(user)));
 });
 
-app.MapPost("/api/auth/login", (LoginRequest req, AppState state) =>
+app.MapPost("/api/auth/login", async (LoginRequest req, AppDbContext db) =>
 {
-    var email = req.Email?.Trim() ?? string.Empty;
-    var user = state.Users.Values.FirstOrDefault(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-    if (user is null || !PasswordHasher.Verify(req.Password, user.PasswordHash))
+    var email = req.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+    if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
         return Results.BadRequest(new { message = "Invalid credentials." });
 
-    var token = state.IssueToken(user.Id);
+    var token = user.Id.ToString();
     return Results.Ok(new AuthResponse(token, ToUserDto(user)));
 });
 
-app.MapGet("/api/auth/me", (HttpContext http, AppState state) =>
+app.MapGet("/api/auth/me", async (HttpContext http, AppDbContext db) =>
 {
-    var user = state.RequireUser(http);
+    var user = await RequireUserAsync(http, db);
     return user is null ? Results.Unauthorized() : Results.Ok(ToUserDto(user));
 });
 
-app.MapPatch("/api/users/me", (HttpContext http, UpdateProfileRequest req, AppState state) =>
+app.MapPatch("/api/users/me", async (HttpContext http, UpdateProfileRequest req, AppDbContext db) =>
 {
-    var user = state.RequireUser(http);
+    var user = await RequireUserAsync(http, db);
     if (user is null) return Results.Unauthorized();
 
     user.FullName = string.IsNullOrWhiteSpace(req.FullName) ? user.FullName : req.FullName.Trim();
     user.Bio = req.Bio?.Trim() ?? user.Bio;
+    await db.SaveChangesAsync();
     return Results.Ok(ToUserDto(user));
 });
 
-app.MapPost("/api/users/me/avatar", (HttpContext http, UpdateAvatarRequest req, AppState state) =>
+app.MapPost("/api/users/me/avatar", async (HttpContext http, UpdateAvatarRequest req, AppDbContext db) =>
 {
-    var user = state.RequireUser(http);
+    var user = await RequireUserAsync(http, db);
     if (user is null) return Results.Unauthorized();
     user.AvatarUrl = req.AvatarUrl?.Trim();
+    await db.SaveChangesAsync();
     return Results.Ok(ToUserDto(user));
 });
 
-app.MapGet("/api/users", (HttpContext http, string? q, AppState state) =>
+app.MapGet("/api/users", async (HttpContext http, string? q, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
 
     var query = (q ?? string.Empty).Trim().ToLowerInvariant();
-    var users = state.Users.Values
+    var users = await db.Users
         .Where(u => u.Id != me.Id)
-        .Where(u => string.IsNullOrEmpty(query) || u.FullName.ToLowerInvariant().Contains(query) || u.Email.Contains(query))
-        .Select(u => new UserListItemDto(u.Id, u.Email, u.FullName, u.Bio, u.AvatarUrl, state.GetFriendshipStatus(me.Id, u.Id)))
-        .ToList();
+        .Where(u => string.IsNullOrEmpty(query) || u.FullName.ToLower().Contains(query) || u.Email.Contains(query))
+        .ToListAsync();
 
-    return Results.Ok(users);
+    var friendships = await db.Friendships.ToListAsync();
+    var result = users.Select(u => new UserListItemDto(u.Id, u.Email, u.FullName, u.Bio, u.AvatarUrl, GetFriendshipStatus(friendships, me.Id, u.Id))).ToList();
+    return Results.Ok(result);
 });
 
-app.MapGet("/api/users/{userId:guid}", (HttpContext http, Guid userId, AppState state) =>
+app.MapGet("/api/users/{userId:guid}", async (HttpContext http, Guid userId, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
-    if (!state.Users.TryGetValue(userId, out var user)) return Results.NotFound();
 
-    var areFriends = state.AreFriends(me.Id, userId);
-    var posts = state.Posts.Values
+    var user = await db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+    if (user is null) return Results.NotFound();
+
+    var friendships = await db.Friendships.ToListAsync();
+    var areFriends = AreFriends(friendships, me.Id, userId);
+
+    var posts = await db.Posts.Include(x => x.Author)
         .Where(p => p.AuthorId == userId && (me.Id == userId || areFriends))
         .OrderByDescending(p => p.CreatedAt)
-        .Select(p => state.ToPostDto(p))
-        .ToList();
+        .ToListAsync();
 
-    return Results.Ok(new ProfileDetailsDto(ToUserDto(user), areFriends, posts));
+    return Results.Ok(new ProfileDetailsDto(ToUserDto(user), areFriends, posts.Select(ToPostDto).ToList()));
 });
 
-app.MapPost("/api/friend-requests/{targetUserId:guid}", async (HttpContext http, Guid targetUserId, AppState state, IHubContext<SocialHub> hub) =>
+app.MapPost("/api/friend-requests/{targetUserId:guid}", async (HttpContext http, Guid targetUserId, AppDbContext db, IHubContext<SocialHub> hub) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
-    if (!state.Users.ContainsKey(targetUserId)) return Results.NotFound();
+    if (!await db.Users.AnyAsync(x => x.Id == targetUserId)) return Results.NotFound();
     if (targetUserId == me.Id) return Results.BadRequest(new { message = "Cannot friend yourself." });
-    if (state.AreFriends(me.Id, targetUserId)) return Results.BadRequest(new { message = "Already friends." });
-    if (state.Friendships.Values.Any(f => f.Status == FriendshipStatus.Pending && ((f.RequesterId == me.Id && f.AddresseeId == targetUserId) || (f.RequesterId == targetUserId && f.AddresseeId == me.Id))))
+
+    var friendships = await db.Friendships.ToListAsync();
+    if (AreFriends(friendships, me.Id, targetUserId)) return Results.BadRequest(new { message = "Already friends." });
+    if (friendships.Any(f => f.Status == "pending" && ((f.RequesterId == me.Id && f.AddresseeId == targetUserId) || (f.RequesterId == targetUserId && f.AddresseeId == me.Id))))
         return Results.BadRequest(new { message = "Pending request already exists." });
 
-    var fr = new FriendshipRecord
+    var fr = new FriendshipEntity
     {
         Id = Guid.NewGuid(),
         RequesterId = me.Id,
         AddresseeId = targetUserId,
-        Status = FriendshipStatus.Pending,
+        Status = "pending",
         CreatedAt = DateTimeOffset.UtcNow
     };
-    state.Friendships[fr.Id] = fr;
+    db.Friendships.Add(fr);
+    await db.SaveChangesAsync();
 
     await hub.Clients.Group($"user:{targetUserId}").SendAsync("friendRequestReceived", new { requestId = fr.Id, fromUserId = me.Id, fromName = me.FullName });
-    return Results.Ok(state.ToFriendshipDto(fr));
+    return Results.Ok(ToFriendshipDto(fr));
 });
 
-app.MapPost("/api/friend-requests/{requestId:guid}/accept", async (HttpContext http, Guid requestId, AppState state, IHubContext<SocialHub> hub) =>
+app.MapPost("/api/friend-requests/{requestId:guid}/accept", async (HttpContext http, Guid requestId, AppDbContext db, IHubContext<SocialHub> hub) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
-    if (!state.Friendships.TryGetValue(requestId, out var fr)) return Results.NotFound();
+
+    var fr = await db.Friendships.FirstOrDefaultAsync(x => x.Id == requestId);
+    if (fr is null) return Results.NotFound();
     if (fr.AddresseeId != me.Id) return Results.Forbid();
-    fr.Status = FriendshipStatus.Accepted;
+
+    fr.Status = "accepted";
     fr.RespondedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
 
     await hub.Clients.Group($"user:{fr.RequesterId}").SendAsync("friendRequestAccepted", new { requestId = fr.Id, byUserId = me.Id, byName = me.FullName });
     await hub.Clients.Group($"user:{fr.RequesterId}").SendAsync("friendsUpdated");
     await hub.Clients.Group($"user:{fr.AddresseeId}").SendAsync("friendsUpdated");
 
-    return Results.Ok(state.ToFriendshipDto(fr));
+    return Results.Ok(ToFriendshipDto(fr));
 });
 
-app.MapPost("/api/friend-requests/{requestId:guid}/reject", (HttpContext http, Guid requestId, AppState state) =>
+app.MapPost("/api/friend-requests/{requestId:guid}/reject", async (HttpContext http, Guid requestId, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
-    if (!state.Friendships.TryGetValue(requestId, out var fr)) return Results.NotFound();
+
+    var fr = await db.Friendships.FirstOrDefaultAsync(x => x.Id == requestId);
+    if (fr is null) return Results.NotFound();
     if (fr.AddresseeId != me.Id) return Results.Forbid();
-    fr.Status = FriendshipStatus.Rejected;
+
+    fr.Status = "rejected";
     fr.RespondedAt = DateTimeOffset.UtcNow;
-    return Results.Ok(state.ToFriendshipDto(fr));
+    await db.SaveChangesAsync();
+    return Results.Ok(ToFriendshipDto(fr));
 });
 
-app.MapGet("/api/friends", (HttpContext http, AppState state) =>
+app.MapGet("/api/friends", async (HttpContext http, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
 
-    var friends = state.Friendships.Values
-        .Where(f => f.Status == FriendshipStatus.Accepted && (f.RequesterId == me.Id || f.AddresseeId == me.Id))
-        .Select(f => f.RequesterId == me.Id ? state.Users[f.AddresseeId] : state.Users[f.RequesterId])
-        .Select(ToUserDto)
-        .ToList();
+    var friendships = await db.Friendships.Where(f => f.Status == "accepted" && (f.RequesterId == me.Id || f.AddresseeId == me.Id)).ToListAsync();
+    var friendIds = friendships.Select(f => f.RequesterId == me.Id ? f.AddresseeId : f.RequesterId).ToList();
+    var friends = await db.Users.Where(u => friendIds.Contains(u.Id)).ToListAsync();
 
-    return Results.Ok(friends);
+    return Results.Ok(friends.Select(ToUserDto).ToList());
 });
 
-app.MapGet("/api/friend-requests/incoming", (HttpContext http, AppState state) =>
+app.MapGet("/api/friend-requests/incoming", async (HttpContext http, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
-    return Results.Ok(state.Friendships.Values.Where(f => f.AddresseeId == me.Id && f.Status == FriendshipStatus.Pending).Select(state.ToFriendshipDto).ToList());
+    var items = await db.Friendships.Where(f => f.AddresseeId == me.Id && f.Status == "pending").ToListAsync();
+    return Results.Ok(items.Select(ToFriendshipDto).ToList());
 });
 
-app.MapGet("/api/friend-requests/outgoing", (HttpContext http, AppState state) =>
+app.MapGet("/api/friend-requests/outgoing", async (HttpContext http, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
-    return Results.Ok(state.Friendships.Values.Where(f => f.RequesterId == me.Id && f.Status == FriendshipStatus.Pending).Select(state.ToFriendshipDto).ToList());
+    var items = await db.Friendships.Where(f => f.RequesterId == me.Id && f.Status == "pending").ToListAsync();
+    return Results.Ok(items.Select(ToFriendshipDto).ToList());
 });
 
-app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppState state, IHubContext<SocialHub> hub) =>
+app.MapPost("/api/posts", async (HttpContext http, CreatePostRequest req, AppDbContext db, IHubContext<SocialHub> hub) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(req.Content)) return Results.BadRequest(new { message = "Content is required." });
 
-    var post = new PostRecord
+    var post = new PostEntity
     {
         Id = Guid.NewGuid(),
         AuthorId = me.Id,
         Content = req.Content.Trim(),
-        ImageUrls = req.ImageUrls?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList() ?? [],
+        ImageUrlsJson = JsonSerializer.Serialize(req.ImageUrls?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList() ?? new List<string>()),
         CreatedAt = DateTimeOffset.UtcNow
     };
 
-    state.Posts[post.Id] = post;
+    db.Posts.Add(post);
+    await db.SaveChangesAsync();
 
-    foreach (var friendId in state.GetFriendIds(me.Id))
-    {
+    var friendIds = await db.Friendships
+        .Where(f => f.Status == "accepted" && (f.RequesterId == me.Id || f.AddresseeId == me.Id))
+        .Select(f => f.RequesterId == me.Id ? f.AddresseeId : f.RequesterId)
+        .ToListAsync();
+
+    foreach (var friendId in friendIds)
         await hub.Clients.Group($"user:{friendId}").SendAsync("feedUpdated", new { authorId = me.Id, authorName = me.FullName, postId = post.Id });
-    }
 
-    return Results.Ok(state.ToPostDto(post));
+    post.Author = me;
+    return Results.Ok(ToPostDto(post));
 });
 
-app.MapGet("/api/posts/feed", (HttpContext http, AppState state) =>
+app.MapGet("/api/posts/feed", async (HttpContext http, AppDbContext db) =>
 {
-    var me = state.RequireUser(http);
+    var me = await RequireUserAsync(http, db);
     if (me is null) return Results.Unauthorized();
 
-    var visibleAuthorIds = state.GetFriendIds(me.Id).Append(me.Id).ToHashSet();
-    var feed = state.Posts.Values
-        .Where(p => visibleAuthorIds.Contains(p.AuthorId))
-        .OrderByDescending(p => p.CreatedAt)
-        .Select(state.ToPostDto)
-        .ToList();
+    var friendIds = await db.Friendships
+        .Where(f => f.Status == "accepted" && (f.RequesterId == me.Id || f.AddresseeId == me.Id))
+        .Select(f => f.RequesterId == me.Id ? f.AddresseeId : f.RequesterId)
+        .ToListAsync();
 
-    return Results.Ok(feed);
+    friendIds.Add(me.Id);
+
+    var posts = await db.Posts.Include(p => p.Author)
+        .Where(p => friendIds.Contains(p.AuthorId))
+        .OrderByDescending(p => p.CreatedAt)
+        .ToListAsync();
+
+    return Results.Ok(posts.Select(ToPostDto).ToList());
 });
 
 app.MapHub<SocialHub>("/hubs/social");
 
 app.Run();
 
-static UserDto ToUserDto(UserRecord user) => new(user.Id, user.Email, user.FullName, user.Bio, user.AvatarUrl, user.CreatedAt);
+static async Task<UserEntity?> RequireUserAsync(HttpContext http, AppDbContext db)
+{
+    var header = http.Request.Headers.Authorization.ToString();
+    if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ")) return null;
+    var token = header[7..].Trim();
+    return Guid.TryParse(token, out var userId) ? await db.Users.FirstOrDefaultAsync(x => x.Id == userId) : null;
+}
+
+static UserDto ToUserDto(UserEntity user) => new(user.Id, user.Email, user.FullName, user.Bio, user.AvatarUrl, user.CreatedAt);
+static FriendshipDto ToFriendshipDto(FriendshipEntity fr) => new(fr.Id, fr.RequesterId, fr.AddresseeId, fr.Status, fr.CreatedAt, fr.RespondedAt);
+static PostDto ToPostDto(PostEntity post) => new(post.Id, post.AuthorId, post.Author?.FullName ?? "Unknown", post.Author?.AvatarUrl, post.Content, JsonSerializer.Deserialize<List<string>>(post.ImageUrlsJson) ?? new List<string>(), post.CreatedAt);
+
+static bool AreFriends(List<FriendshipEntity> friendships, Guid a, Guid b) => friendships.Any(f => f.Status == "accepted" && ((f.RequesterId == a && f.AddresseeId == b) || (f.RequesterId == b && f.AddresseeId == a)));
+static string GetFriendshipStatus(List<FriendshipEntity> friendships, Guid meId, Guid otherUserId)
+{
+    var fr = friendships.FirstOrDefault(f => (f.RequesterId == meId && f.AddresseeId == otherUserId) || (f.RequesterId == otherUserId && f.AddresseeId == meId));
+    if (fr is null) return "none";
+    return fr.Status switch
+    {
+        "accepted" => "friends",
+        "pending" when fr.RequesterId == meId => "outgoing_pending",
+        "pending" => "incoming_pending",
+        "rejected" => "rejected",
+        _ => "none"
+    };
+}
 
 record RegisterRequest(string Email, string Password, string FullName);
 record LoginRequest(string Email, string Password);
@@ -252,89 +321,6 @@ record PostDto(Guid Id, Guid AuthorId, string AuthorName, string? AuthorAvatarUr
 record FriendshipDto(Guid Id, Guid RequesterId, Guid AddresseeId, string Status, DateTimeOffset CreatedAt, DateTimeOffset? RespondedAt);
 record ProfileDetailsDto(UserDto User, bool AreFriends, List<PostDto> Posts);
 
-enum FriendshipStatus { Pending, Accepted, Rejected }
-
-class UserRecord
-{
-    public Guid Id { get; set; }
-    public string Email { get; set; } = string.Empty;
-    public string PasswordHash { get; set; } = string.Empty;
-    public string FullName { get; set; } = string.Empty;
-    public string Bio { get; set; } = string.Empty;
-    public string? AvatarUrl { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-}
-
-class FriendshipRecord
-{
-    public Guid Id { get; set; }
-    public Guid RequesterId { get; set; }
-    public Guid AddresseeId { get; set; }
-    public FriendshipStatus Status { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? RespondedAt { get; set; }
-}
-
-class PostRecord
-{
-    public Guid Id { get; set; }
-    public Guid AuthorId { get; set; }
-    public string Content { get; set; } = string.Empty;
-    public List<string> ImageUrls { get; set; } = [];
-    public DateTimeOffset CreatedAt { get; set; }
-}
-
-class AppState
-{
-    public ConcurrentDictionary<Guid, UserRecord> Users { get; } = new();
-    public ConcurrentDictionary<Guid, FriendshipRecord> Friendships { get; } = new();
-    public ConcurrentDictionary<Guid, PostRecord> Posts { get; } = new();
-    private ConcurrentDictionary<string, Guid> Tokens { get; } = new();
-
-    public string IssueToken(Guid userId)
-    {
-        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-        Tokens[token] = userId;
-        return token;
-    }
-
-    public UserRecord? RequireUser(HttpContext http)
-    {
-        var header = http.Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ")) return null;
-        var token = header[7..].Trim();
-        return Tokens.TryGetValue(token, out var userId) && Users.TryGetValue(userId, out var user) ? user : null;
-    }
-
-    public bool AreFriends(Guid a, Guid b) => Friendships.Values.Any(f => f.Status == FriendshipStatus.Accepted && ((f.RequesterId == a && f.AddresseeId == b) || (f.RequesterId == b && f.AddresseeId == a)));
-
-    public IEnumerable<Guid> GetFriendIds(Guid userId) => Friendships.Values
-        .Where(f => f.Status == FriendshipStatus.Accepted && (f.RequesterId == userId || f.AddresseeId == userId))
-        .Select(f => f.RequesterId == userId ? f.AddresseeId : f.RequesterId);
-
-    public string GetFriendshipStatus(Guid meId, Guid otherUserId)
-    {
-        var fr = Friendships.Values.FirstOrDefault(f => (f.RequesterId == meId && f.AddresseeId == otherUserId) || (f.RequesterId == otherUserId && f.AddresseeId == meId));
-        if (fr is null) return "none";
-        return fr.Status switch
-        {
-            FriendshipStatus.Accepted => "friends",
-            FriendshipStatus.Pending when fr.RequesterId == meId => "outgoing_pending",
-            FriendshipStatus.Pending => "incoming_pending",
-            FriendshipStatus.Rejected => "rejected",
-            _ => "none"
-        };
-    }
-
-    public FriendshipDto ToFriendshipDto(FriendshipRecord fr) => new(fr.Id, fr.RequesterId, fr.AddresseeId, fr.Status.ToString().ToLowerInvariant(), fr.CreatedAt, fr.RespondedAt);
-
-    public PostDto ToPostDto(PostRecord post)
-    {
-        var author = Users[post.AuthorId];
-        return new PostDto(post.Id, post.AuthorId, author.FullName, author.AvatarUrl, post.Content, post.ImageUrls, post.CreatedAt);
-    }
-}
-
 class SocialHub : Hub
 {
     public override async Task OnConnectedAsync()
@@ -342,27 +328,8 @@ class SocialHub : Hub
         var http = Context.GetHttpContext();
         var userId = http?.Request.Query["userId"].ToString();
         if (Guid.TryParse(userId, out var parsedUserId))
-        {
             await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{parsedUserId}");
-        }
+
         await base.OnConnectedAsync();
-    }
-}
-
-static class PasswordHasher
-{
-    public static string Hash(string password)
-    {
-        var salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
-        var hash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(password + salt)));
-        return $"{salt}:{hash}";
-    }
-
-    public static bool Verify(string password, string stored)
-    {
-        var parts = stored.Split(':');
-        if (parts.Length != 2) return false;
-        var computed = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(password + parts[0])));
-        return computed == parts[1];
     }
 }

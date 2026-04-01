@@ -14,7 +14,8 @@
 - Added Docker Compose for PostgreSQL
 
 ## Not fully completed yet
-- Backend still needs full migration from in-memory state to EF Core + PostgreSQL runtime
+- Backend now has PostgreSQL phase-1 code integration via EF Core DbContext/entities
+- Runtime verification still requires active PostgreSQL service (Docker daemon/local Postgres)
 - JWT auth not yet fully wired end-to-end
 - SignalR server-side realtime fanout not yet finished
 - Media upload is still URL demo, not file upload

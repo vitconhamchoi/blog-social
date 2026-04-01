@@ -30,6 +30,9 @@
 - Friend request accepted event
 - Friends list refresh event
 - Frontend SignalR client now joins user-specific realtime channel using userId
+- Backend PostgreSQL phase-1 integration coded with EF Core DbContext/entities
+- API routes refactored from in-memory store to DbContext-backed queries/writes
+- Database schema auto-create path added with `EnsureCreated()`
 
 ### Current reality
 - Frontend is visually improved and runnable
